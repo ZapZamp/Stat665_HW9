@@ -1,0 +1,113 @@
+---
+title: "Homework 9"
+author: "Michelle Zamperlini"
+date: "2023-11-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(geepack)
+library(lme4)
+library(lattice)
+
+data<- read.csv("deaths_by_firearms-hw9.csv") %>%
+  mutate(state = fct_relevel(state, 'Virginia'))
+```
+
+# Problem 1
+
+a) Do you expect any violations of the independence assumption in this data set? If so, what are the clusters and what dependency structure do you think makes sense here?
+
+I absolutely anticipate clustering to occur by state. When looking at politics and policy, it's common to see the clustering occur by geographic location. I'll be assigning an exchangable correlation structure. Unless something in dataset draws me toward a different conclusion, any observation that occurs within a state should be correlated to each other observation equally.
+
+b) Does the data suggest you can drop one or more of the 3-way interactions? Why/why not?
+
+Initially, we begin by looking at the saturated model. Dubbed "model_sat", reported below is the summary for this saturated model with a marginal by state. It is immediately apparent by the lack of significance from many of the coefficient estimates that a less complex model could be fit to the data, so we move forward with looking at 3-way interactions.
+
+```{r, include = FALSE}
+model_sat <- geeglm(number_of_deaths ~ gun_control_laws*years_past_2010*ownership*relationship,
+                    data = data,
+                    family = poisson('log'),
+                    corstr = 'exchangeable',
+                    id = factor(state))
+
+model_3w <- geeglm(number_of_deaths ~gun_control_laws*years_past_2010*ownership*relationship - gun_control_laws:years_past_2010:ownership:relationship,
+                   data = data,
+                   family = poisson('log'),
+                   corstr = 'exchangeable',
+                   id = factor(state))
+
+model_3refined <- geeglm(number_of_deaths ~gun_control_laws*years_past_2010*ownership*relationship - gun_control_laws:years_past_2010:ownership:relationship - years_past_2010:ownership:relationship - gun_control_laws:years_past_2010:ownership - gun_control_laws:years_past_2010:relationship,
+                         data = data,
+                         family = poisson('log'),
+                         corstr = 'exchangeable',
+                         id = factor(state))
+```
+```{r}
+summary(model_sat)
+```
+
+We eliminate the 4 way interaction of the saturated model and begin analyzing the 3-way interactions in the summary belo. We still see a large model with quite a few terms that show no significance with number of deaths by firearms. The summary seems to indicate that quite a few of these 3 way interactions can be taken out of the model. 
+
+```{r}
+summary(model_3w)
+```
+
+For the refined 3-way model, we choose to eliminate the following: *[YOR][GYO][GYR]*. These interactions showed little to no statistical significance on the model's prediction of number of deaths by firearms. *[GOR]* shows potential significance, so it's the only 3-way term that will be left in the model. The model summary below demonstrates quite a few more terms with significance to our response variable now that we have simplified the model by eliminating so many terms. There is still room to simplify further by looking at the 2 way interactions, but this seems outside the scope of the assignment and so they are left in the model.
+
+```{r}
+summary(model_3refined)
+```
+
+c) For the simplest model you deemed appropriate in step b., is there substantial correlation within states, and does the model suggest over/underdispersion? If in step b. you do not find a model with one or more 3-way interactions dropped, base your answer on the model with all 3-way interactions.
+
+When it comes to analyzing the correlation within states, or within the clusters, we look towards the alpha value reported in the model summary. For ease, the value has been individually pulled below in the r code. The estimated correlation parameter for observations within a cluster is \(\alpha = 0.599\), a fairly high value that leads me to believe that there is correlation within the states that is worth modeling. 
+
+When answering the question of over/underdispersion, we look towards the plot of fitted vs residual values, also seen below. The numberous points above the line indicates to me that there is over dispersion.
+
+```{r}
+model_3refined$geese$alpha
+```
+```{r}
+plot(model_3refined)
+```
+
+# Problem 2
+
+```{r}
+model_random <- glmer(number_of_deaths ~ 
+                        (1 + ownership | state) + gun_control_laws*years_past_2010*ownership*relationship - gun_control_laws:years_past_2010:ownership:relationship - years_past_2010:ownership:relationship - gun_control_laws:years_past_2010:ownership - gun_control_laws:years_past_2010:relationship,
+                      data = data,
+                      family = poisson('log'))
+```
+
+a) Justify your choice of random effects.
+
+Besides the random effects for state that we anticipate from the clustering, I have also chosen ownership to be a random effect. My intuition is that the effect of gun ownership will vary by state due to the nature of some states being more liberal or more conservative in nature. A more conservative state with naturally higher gun ownership may see a different effect due to that value than a more liberal state where gun ownership is naturally lower. 
+
+b) Briefly explain if the fitted model suggests substantial variation between states. Does the GLMM you fitted account for over/underdispersion? Is that relevant here?
+
+To look at the variation between states, I have reported the coefficients below from the random effects model. Specifically, we focus on the intercept and ownership, the two random effects selected. The fluctuation and variance within these two columns (i.e. within the random effect coefficients by state) tells us that we made the proper choice. Ownership, for example varies between approximately -2 and 10, while the intercept associated with the state clustering ranges from -.5 to 3. 
+
+```{r}
+coefficients <- coef(model_random2)
+coefficients$state[,c(1,4)]
+```
+
+The question of fitting for the overdispersion previously seen involves once again plottin the fitted vs residual values. The plot is seen below and is much more well behaved than for our previous model. 
+
+```{r}
+plot(model_random)
+```
+
+c) Describe the most substantial differences between the parameter estimates in this random effects model and the marginal model in Problem 1.
+
+The largest difference from the marginal models in Problem 1 to the estimates in the random effects model is the reduction in the standard error. We see quite a few more terms being signifiant now and having smaller errors than in the marginal model. The one 3 way interaction that was left in the model, as well, changed signs in the random effects model. 
+
+d) Which model would a policy maker at the state level choose to better understand the trend of the number of homicides and the associations with the covariates we have available? How about a federal policy maker? Explain.
+
+e) Describe one association that would be relevant to a state policy maker. Ensure to report the association on the original scale and include confidence intervals to give a better picture of the variability. Remember that main effects and interactions cannot be interpreted on their own in the presence of significant higher-order interactions involving these terms!
+
+I want to draw attention to the shift I noticed when using the random effects model. The effect of [GOR] when the relationsihp is spousal is both positive and significant when looking at the random effects model.
